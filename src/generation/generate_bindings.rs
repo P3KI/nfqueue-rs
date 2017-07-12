@@ -16,6 +16,7 @@ fn main() {
         .whitelisted_type("(nfq|NFQ)_.*")
         .whitelisted_function("(nfq|NFQ)_.*")
         .whitelisted_var("(nfq|NFQ)_.*")
+        .constified_enum(".*")
         .generate()
         .expect("Unable to generate bindings");
 

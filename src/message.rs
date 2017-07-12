@@ -63,14 +63,6 @@ pub enum XMLFormatFlags {
     XmlAll,
 }
 
-const NFQ_XML_HW      : i32  = (1 << 0);
-const NFQ_XML_MARK    : i32  = (1 << 1);
-const NFQ_XML_DEV     : i32  = (1 << 2);
-const NFQ_XML_PHYSDEV : i32  = (1 << 3);
-const NFQ_XML_PAYLOAD : i32  = (1 << 4);
-const NFQ_XML_TIME    : i32  = (1 << 5);
-const NFQ_XML_ALL     : i32  = (!0u32) as i32;
-
 /// Metaheader wrapping a packet
 #[repr(C)]
 pub struct NfMsgPacketHdr {
@@ -287,9 +279,9 @@ impl Message {
                 XMLFormatFlags::XmlTime    => NFQ_XML_TIME,
                 XMLFormatFlags::XmlAll     => NFQ_XML_ALL,
             }
-        }).fold(0i32, |acc, i| acc | i);
+        }).fold(0u32, |acc, i| acc | i);
 
-        let rc = unsafe { nfq_snprintf_xml(buf_ptr, buf_len, self.nfad, xml_flags) };
+        let rc = unsafe { nfq_snprintf_xml(buf_ptr, buf_len, self.nfad, xml_flags as i32) };
         if rc < 0 { panic!("nfq_snprintf_xml"); } // XXX see snprintf error codes
 
         match std::str::from_utf8(&buf) {
