@@ -327,7 +327,7 @@ impl Message {
         let rc = unsafe { nfq_snprintf_xml(buf_ptr, buf_len, self.nfad, xml_flags) };
         if rc < 0 { panic!("nfq_snprintf_xml"); } // XXX see snprintf error codes
 
-        match std::str::from_utf8(&buf) {
+        match std::str::from_utf8(&buf[..rc as usize]) {
             Ok(v) => Ok(v.to_string()),
             Err(e) => Err(e),
         }
