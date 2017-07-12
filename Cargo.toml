@@ -9,8 +9,13 @@ name = "nfqueue"
 version = "0.9.1"
 authors = [ "Pierre Chifflier <chifflier@wzdftpd.net>" ]
 
+build = "src/generation/generate_bindings.rs"
+
+[build-dependencies]
+bindgen = "^0.26"
+
 [dependencies]
 libc = "^0.2"
 
-[dev_dependencies]
+[dev-dependencies]
 pnet = "0.17.1"
