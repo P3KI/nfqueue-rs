@@ -1,5 +1,6 @@
 extern crate libc;
 
+use bindings::*;
 use hwaddr::*;
 use std;
 
@@ -7,8 +8,8 @@ type NfqueueData = *const libc::c_void;
 
 /// Opaque struct `Message`: abstracts NFLOG data representing a packet data and metadata
 pub struct Message {
-    qqh  : *const libc::c_void,
-    nfad : NfqueueData,
+    qqh  : *mut nfq_q_handle,
+    nfad : *mut nfq_data,
     id   : u32,
     l3_proto : u16,
 }
@@ -64,13 +65,13 @@ pub enum XMLFormatFlags {
     XmlAll,
 }
 
-const NFQ_XML_HW      : u32  = (1 << 0);
-const NFQ_XML_MARK    : u32  = (1 << 1);
-const NFQ_XML_DEV     : u32  = (1 << 2);
-const NFQ_XML_PHYSDEV : u32  = (1 << 3);
-const NFQ_XML_PAYLOAD : u32  = (1 << 4);
-const NFQ_XML_TIME    : u32  = (1 << 5);
-const NFQ_XML_ALL     : u32  = (!0u32);
+const NFQ_XML_HW      : i32  = (1 << 0);
+const NFQ_XML_MARK    : i32  = (1 << 1);
+const NFQ_XML_DEV     : i32  = (1 << 2);
+const NFQ_XML_PHYSDEV : i32  = (1 << 3);
+const NFQ_XML_PAYLOAD : i32  = (1 << 4);
+const NFQ_XML_TIME    : i32  = (1 << 5);
+const NFQ_XML_ALL     : i32  = (!0u32) as i32;
 
 /// Hardware address
 #[repr(C)]
@@ -94,35 +95,12 @@ pub struct NfMsgPacketHdr {
     pub hook : u8,
 }
 
-#[link(name = "netfilter_queue")]
-extern {
-    // queue handling
-    //fn nfq_set_verdict(qqh: *const libc::c_void, id: u32, verdict: u32, data_len: u32, data: *const libc::c_uchar);
-    // requires netfilter_queue >= 1.0
-    fn nfq_set_verdict2(qqh: *const libc::c_void, id: u32, verdict: u32, mark: u32, data_len: u32, data: *const libc::c_uchar);
-
-    // message parsing functions
-    fn nfq_get_msg_packet_hdr(nfad: NfqueueData) -> *const libc::c_void;
-    fn nfq_get_nfmark (nfad: NfqueueData) -> u32;
-    fn nfq_get_timestamp (nfad: NfqueueData, tv: *mut libc::timeval) -> u32;
-    fn nfq_get_indev (nfad: NfqueueData) -> u32;
-    fn nfq_get_physindev (nfad: NfqueueData) -> u32;
-    fn nfq_get_outdev (nfad: NfqueueData) -> u32;
-    fn nfq_get_physoutdev (nfad: NfqueueData) -> u32;
-
-    fn nfq_get_packet_hw (nfad: NfqueueData) -> *const NfMsgPacketHw;
-    fn nfq_get_payload (nfad: NfqueueData, data: &*mut libc::c_void) -> libc::c_int;
-
-    // printing functions
-    fn nfq_snprintf_xml (buf: *mut u8, rem: libc::size_t, tb: NfqueueData, flags: libc::c_uint) -> libc::c_int;
-}
-
 impl Message {
     /// Create a `Messsage` from a valid NfqueueData pointer
     ///
     /// **This function should never be called directly**
     #[doc(hidden)]
-    pub fn new(qqh: *const libc::c_void, nfad: *const libc::c_void) -> Message {
+    pub fn new(qqh: *mut nfq_q_handle, nfad: *mut nfq_data) -> Message {
         let msg_hdr = unsafe { nfq_get_msg_packet_hdr(nfad) as *const NfMsgPacketHdr };
         assert!(!msg_hdr.is_null());
         let id = u32::from_be( unsafe{(*msg_hdr).packet_id} );
@@ -151,8 +129,8 @@ impl Message {
     }
 
     /// Get the packet timestamp
-    pub fn get_timestamp(&self) -> Result<libc::timeval,NfqueueError> {
-        let mut tv = libc::timeval {
+    pub fn get_timestamp(&self) -> Result<timeval, NfqueueError> {
+        let mut tv = timeval {
             tv_sec: 0,
             tv_usec: 0,
         };
@@ -216,7 +194,7 @@ impl Message {
     pub fn get_packet_hw<'a>(&'a self) -> Result<HwAddr<'a>,NfqueueError> {
         let c_hw = unsafe { nfq_get_packet_hw(self.nfad) };
 
-        if c_hw == std::ptr::null() {
+        if c_hw.is_null() {
             return Err(NfqueueError::NoSuchAttribute);
         }
 
@@ -241,11 +219,11 @@ impl Message {
     ///
     /// * `verdict`: verdict to return to netfilter (`Verdict::Accept`,
     ///   `Verdict::Drop`, ...)
-    pub fn set_verdict(&self, verdict: Verdict) {
+    pub fn set_verdict(&self, verdict: Verdict) -> i32 {
         assert!(!self.qqh.is_null());
         let c_verdict = u32_of_verdict(verdict);
         //unsafe { nfq_set_verdict(self.qqh, self.id, c_verdict, 0, std::ptr::null_mut()) };
-        unsafe { nfq_set_verdict2(self.qqh, self.id, c_verdict, 0, 0, std::ptr::null_mut()) };
+        unsafe { nfq_set_verdict2(self.qqh, self.id, c_verdict, 0, 0, std::ptr::null_mut()) }
     }
 
     /// Issue a verdict on a packet, with a mark
@@ -299,7 +277,7 @@ impl Message {
     /// depend on the mode set with the `set_mode()` function.
     pub fn get_payload<'a>(&'a self) -> &'a [u8] {
         let c_ptr = std::ptr::null_mut();
-        let payload_len = unsafe { nfq_get_payload(self.nfad, &c_ptr) };
+        let payload_len = unsafe { nfq_get_payload(self.nfad, *c_ptr) };
         let payload : &[u8] = unsafe { std::slice::from_raw_parts(c_ptr as *mut u8, payload_len as usize) };
 
         return payload;
@@ -309,7 +287,7 @@ impl Message {
     pub fn as_xml_str(&self, flags: &[XMLFormatFlags]) -> Result<String,std::str::Utf8Error> {
         // if buffer size is smaller than output, nfq_snprintf_xml will fail
         let mut buf : [u8;65536] = [0;65536];
-        let buf_ptr = buf.as_mut_ptr() as *mut libc::c_uchar;
+        let buf_ptr = buf.as_mut_ptr() as *mut libc::c_char;
         let buf_len = buf.len() as libc::size_t;
 
         let xml_flags = flags.iter().map(|flag| {
@@ -322,7 +300,7 @@ impl Message {
                 XMLFormatFlags::XmlTime    => NFQ_XML_TIME,
                 XMLFormatFlags::XmlAll     => NFQ_XML_ALL,
             }
-        }).fold(0u32, |acc, i| acc | i);
+        }).fold(0i32, |acc, i| acc | i);
 
         let rc = unsafe { nfq_snprintf_xml(buf_ptr, buf_len, self.nfad, xml_flags) };
         if rc < 0 { panic!("nfq_snprintf_xml"); } // XXX see snprintf error codes

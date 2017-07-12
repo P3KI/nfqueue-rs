@@ -134,7 +134,7 @@ fn handle_transport_protocol(id: u32, source: IpAddr, destination: IpAddr, proto
     }
 }
 
-fn queue_callback(msg: &nfqueue::Message, state: &mut State) {
+fn queue_callback(msg: nfqueue::Message, state: &mut State) -> i32 {
     println!("\n---");
     println!("Packet received [id: 0x{:x}]\n", msg.get_id());
 
@@ -153,18 +153,20 @@ fn queue_callback(msg: &nfqueue::Message, state: &mut State) {
         None    => println!("Malformed IPv4 packet"),
     }
 
-    msg.set_verdict(nfqueue::Verdict::Accept);
+    msg.set_verdict(nfqueue::Verdict::Accept)
 }
 
 fn main() {
     let mut q = nfqueue::Queue::new(State::new());
     println!("nfqueue example program: parse packet protocol layers and accept packet");
 
+    let protocol_family = libc::AF_INET as u16;
+
     q.open();
-    q.unbind(libc::AF_INET); // ignore result, failure is not critical here
+    q.unbind(protocol_family); // ignore result, failure is not critical here
 
 
-    let rc = q.bind(libc::AF_INET);
+    let rc = q.bind(protocol_family);
     assert!(rc == 0);
 
     q.create_queue(0, queue_callback);

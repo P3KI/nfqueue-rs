@@ -71,22 +71,8 @@ pub type NfqueueCallback = fn (&Message) -> ();
 type NfqueueCCallback = extern "C" fn (*const libc::c_void, *const libc::c_void, *const libc::c_void, *const libc::c_void );
 
 
-#[link(name = "netfilter_queue")]
-extern {
-    // library setup
-    fn nfq_open() -> NfqueueHandle;
-    fn nfq_close(qh: NfqueueHandle);
-    fn nfq_bind_pf (qh: NfqueueHandle, pf: libc::c_int) -> libc::c_int;
-    fn nfq_unbind_pf (qh: NfqueueHandle, pf: libc::c_int) -> libc::c_int;
-
-    // queue handling
-    fn nfq_fd (h: NfqueueHandle) -> libc::c_int;
-    fn nfq_create_queue(qh: NfqueueHandle, num: u16, cb: NfqueueCCallback, data: *mut libc::c_void) -> NfqueueQueueHandle;
-    fn nfq_destroy_queue(qh: NfqueueHandle) -> libc::c_int;
-    fn nfq_handle_packet(qh: NfqueueHandle, buf: *mut libc::c_void, rc: libc::c_int) -> libc::c_int;
-    fn nfq_set_mode (gh: NfqueueQueueHandle, mode: u8, range: u32) -> libc::c_int;
-    fn nfq_set_queuelen (gh: NfqueueQueueHandle, queuelen: u32) -> libc::c_int;
-}
+pub use bindings::*;
+mod bindings;
 
 /// Copy modes
 pub enum CopyMode {
@@ -104,9 +90,9 @@ const NFQNL_COPY_PACKET : u8 = 0x02;
 
 /// Opaque struct `Queue`: abstracts an NFLOG queue
 pub struct Queue<T> {
-    qh  : NfqueueHandle,
-    qqh : NfqueueQueueHandle,
-    cb  : Option<fn (&Message, &mut T) -> ()>,
+    qh  : *mut nfq_handle,
+    qqh : *mut nfq_q_handle,
+    cb  : Option<fn (Message, &mut T) -> i32>,
     data: T,
 }
 
@@ -154,7 +140,7 @@ impl <T: Send> Queue<T> {
     /// Remarks:
     ///
     /// **Requires root privileges**
-    pub fn bind(&self, pf: libc::c_int) -> i32 {
+    pub fn bind(&self, pf: libc::c_ushort) -> i32 {
         assert!(!self.qh.is_null());
         return unsafe { nfq_bind_pf(self.qh,pf) };
     }
@@ -171,7 +157,7 @@ impl <T: Send> Queue<T> {
     /// Remarks:
     ///
     /// **Requires root privileges**
-    pub fn unbind(&self, pf: libc::c_int) -> i32 {
+    pub fn unbind(&self, pf: libc::c_ushort) -> i32 {
         assert!(!self.qh.is_null());
         return unsafe { nfq_unbind_pf(self.qh,pf) }
     }
@@ -197,12 +183,14 @@ impl <T: Send> Queue<T> {
     ///
     /// * `num`: the number of the queue to bind to
     /// * `cb`: callback function to call for each queued packet
-    pub fn create_queue(&mut self, num: u16, cb: fn(&Message, &mut T)) {
+    pub fn create_queue(&mut self, num: u16, cb: fn(Message, &mut T) -> i32) -> bool {
         assert!(!self.qh.is_null());
         assert!(self.qqh.is_null());
         let self_ptr = unsafe { std::mem::transmute(&*self) };
         self.cb = Some(cb);
-        self.qqh = unsafe { nfq_create_queue(self.qh, num, real_callback::<T>, self_ptr) };
+        self.qqh = unsafe { nfq_create_queue(self.qh, num, Some(real_callback::<T>), self_ptr) };
+
+        !self.qqh.is_null()
     }
 
     /// Destroys a group handle
@@ -247,9 +235,9 @@ impl <T: Send> Queue<T> {
     /// Sets the size of the queue in kernel. This fixes the maximum number of
     /// packets the kernel will store before internally before dropping upcoming
     /// packets
-    pub fn set_queuelen(&self, queuelen: u32) {
+    pub fn set_queue_maxlen(&self, queuelen: u32) -> i32 {
         assert!(!self.qqh.is_null());
-        unsafe { nfq_set_queuelen(self.qqh, queuelen); }
+        unsafe { nfq_set_queue_maxlen(self.qqh, queuelen) }
     }
 
     /// Runs an infinite loop, waiting for packets and triggering the callback.
@@ -260,11 +248,11 @@ impl <T: Send> Queue<T> {
 
         let fd = self.fd();
         let mut buf : [u8;65536] = [0;65536];
-        let buf_ptr = buf.as_mut_ptr() as *mut libc::c_void;
+        let buf_ptr = buf.as_mut_ptr() as *mut libc::c_char;
         let buf_len = buf.len() as libc::size_t;
 
         loop {
-            let rc = unsafe { libc::recv(fd,buf_ptr,buf_len,0) };
+            let rc = unsafe { libc::recv(fd, buf_ptr as *mut libc::c_void, buf_len, 0) };
             if rc < 0 { panic!("error in recv()"); };
 
             let rv = unsafe { nfq_handle_packet(self.qh, buf_ptr, rc as libc::c_int) };
@@ -277,7 +265,7 @@ impl <T: Send> Queue<T> {
 
 
 #[doc(hidden)]
-extern "C" fn real_callback<T>(qqh: *const libc::c_void, _nfmsg: *const libc::c_void, nfad: *const libc::c_void, data: *const libc::c_void ) {
+unsafe extern "C" fn real_callback<T>(qqh: *mut nfq_q_handle, _nfmsg: *mut nfgenmsg, nfad: *mut nfq_data, data: *mut std::os::raw::c_void) -> i32 {
     let raw : *mut Queue<T> = unsafe { std::mem::transmute(data) };
 
     let ref mut q = unsafe { &mut *raw };
@@ -286,7 +274,7 @@ extern "C" fn real_callback<T>(qqh: *const libc::c_void, _nfmsg: *const libc::c_
     match q.cb {
         None => panic!("no callback registered"),
         Some(callback) => {
-            callback(&mut msg, &mut q.data);
+            callback(msg, &mut q.data)
         },
     }
 }
@@ -329,9 +317,11 @@ mod tests {
 
         assert!(!q.qh.is_null());
 
-        let rc = q.bind(libc::AF_INET);
+        let protocol_family = libc::AF_INET as u16;
+        let rc = q.bind(protocol_family);
+
         println!("q.bind: {}", rc);
-        assert!(q.bind(libc::AF_INET) == 0);
+        assert!(q.bind(protocol_family) == 0);
 
         q.close();
     }
