@@ -4,8 +4,6 @@ use bindings::*;
 use hwaddr::*;
 use std;
 
-type NfqueueData = *const libc::c_void;
-
 /// Opaque struct `Message`: abstracts NFLOG data representing a packet data and metadata
 pub struct Message {
     qqh  : *mut nfq_q_handle,
@@ -72,17 +70,6 @@ const NFQ_XML_PHYSDEV : i32  = (1 << 3);
 const NFQ_XML_PAYLOAD : i32  = (1 << 4);
 const NFQ_XML_TIME    : i32  = (1 << 5);
 const NFQ_XML_ALL     : i32  = (!0u32) as i32;
-
-/// Hardware address
-#[repr(C)]
-struct NfMsgPacketHw {
-    /// Hardware address length
-    pub hw_addrlen : u16,
-    /// Padding (should be ignored)
-    pub _pad : u16,
-    /// The hardware address
-    pub hw_addr : [u8;8],
-}
 
 /// Metaheader wrapping a packet
 #[repr(C)]

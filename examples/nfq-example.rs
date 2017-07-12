@@ -1,5 +1,5 @@
-extern crate nfqueue;
 extern crate libc;
+extern crate nfqueue;
 
 struct State {
     count: u32,
@@ -39,10 +39,6 @@ fn main() {
     q.create_queue(0, queue_callback);
     q.set_mode(nfqueue::CopyMode::CopyPacket, 0xffff);
 
-
     q.run_loop();
-
-
-
     q.close();
 }

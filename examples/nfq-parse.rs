@@ -1,7 +1,7 @@
 // Some code borrowed from https://github.com/libpnet/libpnet/blob/master/examples/packetdump.rs
 
-extern crate nfqueue;
 extern crate libc;
+extern crate nfqueue;
 
 use std::net::IpAddr;
 
@@ -165,17 +165,12 @@ fn main() {
     q.open();
     q.unbind(protocol_family); // ignore result, failure is not critical here
 
-
     let rc = q.bind(protocol_family);
     assert!(rc == 0);
 
     q.create_queue(0, queue_callback);
     q.set_mode(nfqueue::CopyMode::CopyPacket, 0xffff);
 
-
     q.run_loop();
-
-
-
     q.close();
 }

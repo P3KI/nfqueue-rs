@@ -18,41 +18,50 @@
 //! ```rust,ignore
 //! extern crate libc;
 //! extern crate nfqueue;
-//! use std::fmt::Write;
 //!
-//! fn callback(msg: &nfqueue::Message) {
-//!     println!(" -> msg: {}", msg);
+//! struct State {
+//!     count: u32,
+//! }
 //!
-//!     let payload_data = msg.get_payload();
-//!     let mut s = String::new();
-//!     for &byte in payload_data {
-//!         write!(&mut s, "{:X} ", byte).unwrap();
+//! impl State {
+//!     pub fn new() -> State {
+//!         State{ count:0 }
 //!     }
-//!     println!("{}", s);
+//! }
+//!
+//! fn queue_callback(msg: nfqueue::Message, state:&mut State) -> i32 {
+//!     println!("Packet received [id: 0x{:x}]\n", msg.get_id());
+//!
+//!     println!(" -> msg: {}", msg);
 //!
 //!     println!("XML\n{}", msg.as_xml_str(&[nfqueue::XMLFormatFlags::XmlAll]).unwrap());
 //!
-//!     msg.set_verdict(nfqueue::Verdict::Accept);
+//!     state.count += 1;
+//!     println!("count: {}", state.count);
+//!
+//!     msg.set_verdict(nfqueue::Verdict::Accept)
 //! }
 //!
 //! fn main() {
-//!     let mut q = nfqueue::Queue::new();
+//!     let mut q = nfqueue::Queue::new(State::new());
+//!     println!("nfqueue example program: print packets metadata and accept packets");
+//!
+//!     let protocol_family = libc::AF_INET as u16;
 //!
 //!     q.open();
+//!     q.unbind(protocol_family); // ignore result, failure is not critical here
 //!
-//!     let rc = q.bind(libc::AF_INET);
+//!     let rc = q.bind(protocol_family);
 //!     assert!(rc == 0);
 //!
-//!     q.create_queue(0, callback);
+//!     q.create_queue(0, queue_callback);
 //!     q.set_mode(nfqueue::CopyMode::CopyPacket, 0xffff);
 //!
-//!     q.set_callback(callback);
 //!     q.run_loop();
-//!
 //!     q.close();
 //! }
+//!
 //! ```
-
 
 extern crate libc;
 
@@ -61,15 +70,6 @@ mod hwaddr;
 
 pub use message::*;
 mod message;
-
-type NfqueueHandle = *const libc::c_void;
-type NfqueueQueueHandle = *const libc::c_void;
-
-/// Prototype for the callback function, triggered when a packet is received
-pub type NfqueueCallback = fn (&Message) -> ();
-
-type NfqueueCCallback = extern "C" fn (*const libc::c_void, *const libc::c_void, *const libc::c_void, *const libc::c_void );
-
 
 pub use bindings::*;
 mod bindings;
@@ -262,14 +262,12 @@ impl <T: Send> Queue<T> {
 
 }
 
-
-
 #[doc(hidden)]
-unsafe extern "C" fn real_callback<T>(qqh: *mut nfq_q_handle, _nfmsg: *mut nfgenmsg, nfad: *mut nfq_data, data: *mut std::os::raw::c_void) -> i32 {
+extern "C" fn real_callback<T>(qqh: *mut nfq_q_handle, _nfmsg: *mut nfgenmsg, nfad: *mut nfq_data, data: *mut std::os::raw::c_void) -> i32 {
     let raw : *mut Queue<T> = unsafe { std::mem::transmute(data) };
 
     let ref mut q = unsafe { &mut *raw };
-    let mut msg = Message::new (qqh, nfad);
+    let msg = Message::new (qqh, nfad);
 
     match q.cb {
         None => panic!("no callback registered"),
@@ -278,13 +276,6 @@ unsafe extern "C" fn real_callback<T>(qqh: *mut nfq_q_handle, _nfmsg: *mut nfgen
         },
     }
 }
-
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -305,6 +296,9 @@ mod tests {
         q.close();
     }
 
+    // Can't  run this test by default as we do should not have enough rights.
+    // You need to enable it manually to run it via `cargo test` after you ensured that the program
+    // will have the right capabilities.
     #[test]
     #[ignore]
     fn nfqueue_bind() {
